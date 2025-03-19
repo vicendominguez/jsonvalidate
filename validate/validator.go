@@ -10,7 +10,7 @@ import (
 	"sync"
 )
 
-// ValidateJSONFile validates a single JSON file.
+// ValidateJSONFile checks if a single JSON file is valid.
 func ValidateJSONFile(filePath string) error {
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -22,20 +22,22 @@ func ValidateJSONFile(filePath string) error {
 	return validateJSON(decoder)
 }
 
-// ValidateJSONFromStdin validates JSON from standard input.
+// ValidateJSONFromStdin reads and validates JSON from standard input.
 func ValidateJSONFromStdin() error {
 	decoder := json.NewDecoder(os.Stdin)
 	return validateJSON(decoder)
 }
 
-// ValidateJSONFilesRecursively validates all JSON files in a directory concurrently.
-func ValidateJSONFilesRecursively(rootPath string) error {
+// processFilesWithWorkers runs a worker pool to validate files concurrently.
+func processFilesWithWorkers(files []string) error {
 	var wg sync.WaitGroup
-	errChan := make(chan error, 100)   // Buffered channel for errors.
-	fileChan := make(chan string, 100) // Buffered channel for file paths.
+	errChan := make(chan error, len(files))
+	fileChan := make(chan string, len(files))
 
-	// Worker pool to validate files concurrently.
+	// Number of workers (configurable based on performance needs)
 	numWorkers := 10
+
+	// Start worker goroutines
 	for i := 0; i < numWorkers; i++ {
 		wg.Add(1)
 		go func(workerID int) {
@@ -49,45 +51,78 @@ func ValidateJSONFilesRecursively(rootPath string) error {
 		}(i)
 	}
 
-	// Walk the directory tree and send JSON files to the fileChan.
-	walkErr := filepath.Walk(rootPath, func(filePath string, info os.FileInfo, err error) error {
+	// Send file paths to workers
+	for _, filePath := range files {
+		fileChan <- filePath
+	}
+
+	// Close channels when done
+	close(fileChan)
+	wg.Wait()
+	close(errChan)
+
+	// Collect errors
+	var finalErr error
+	for e := range errChan {
+		fmt.Println(e)
+		finalErr = e
+	}
+
+	return finalErr
+}
+
+// ValidateJSONFilesRecursively finds and validates all JSON files in a directory.
+func ValidateJSONFilesRecursively(rootPath string) error {
+	var files []string
+
+	// Walk through the directory and collect JSON files
+	err := filepath.Walk(rootPath, func(filePath string, info os.FileInfo, err error) error {
 		if err != nil {
-			// Log error and continue with other files.
 			fmt.Printf("Error accessing %s: %v\n", filePath, err)
-			return nil
+			return nil // Continue with other files
 		}
-		// Use case-insensitive check if necessary:
 		if !info.IsDir() && strings.HasSuffix(strings.ToLower(info.Name()), ".json") {
 			fmt.Printf("Found JSON file: %s\n", filePath)
-			fileChan <- filePath
+			files = append(files, filePath)
 		}
 		return nil
 	})
 
-	close(fileChan) // Signal that no more files will be sent.
-	wg.Wait()       // Wait for all workers to finish.
-	close(errChan)  // Close error channel after processing is complete.
-
-	// Report any errors encountered during file validation.
-	var finalErr error
-	for e := range errChan {
-		fmt.Println(e)
-		finalErr = e // Last error stored (if needed).
+	if err != nil {
+		return fmt.Errorf("error during file traversal: %w", err)
 	}
 
-	if walkErr != nil {
-		return fmt.Errorf("error during file traversal: %w", walkErr)
+	if len(files) == 0 {
+		fmt.Println("No JSON files found.")
+		return nil
 	}
-	return finalErr
+
+	return processFilesWithWorkers(files)
 }
 
-// validateJSON uses a streaming decoder to check JSON validity.
+// ValidateJSONFilesWithPattern validates JSON files matching a shell pattern.
+func ValidateJSONFilesWithPattern(pattern string) error {
+	// Find files using shell-like pattern matching
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		return fmt.Errorf("invalid pattern %s: %w", pattern, err)
+	}
+
+	if len(matches) == 0 {
+		fmt.Printf("No files matched pattern: %s\n", pattern)
+		return nil
+	}
+
+	return processFilesWithWorkers(matches)
+}
+
+// validateJSON ensures JSON validity.
 func validateJSON(decoder *json.Decoder) error {
 	var obj json.RawMessage
 	for {
 		err := decoder.Decode(&obj)
 		if err == io.EOF {
-			return nil // All JSON decoded successfully.
+			return nil // JSON is valid
 		}
 		if err != nil {
 			return fmt.Errorf("invalid JSON: %w", err)
