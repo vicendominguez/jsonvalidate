@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"jsonvalidate/logger"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,7 +18,7 @@ func ValidateJSONFile(filePath string) error {
 		return fmt.Errorf("failed to open file %s: %w", filePath, err)
 	}
 	defer file.Close()
-
+	logger.Log.Debug("Validating file", logger.Log.Args("Path:", filePath))
 	decoder := json.NewDecoder(file)
 	return validateJSON(decoder)
 }
@@ -34,16 +35,15 @@ func processFilesWithWorkers(files []string) error {
 	errChan := make(chan error, len(files))
 	fileChan := make(chan string, len(files))
 
-	// Number of workers (configurable based on performance needs)
-	numWorkers := 10
+	numWorkers := 10 // Number of parallel workers
 
 	// Start worker goroutines
-	for i := 0; i < numWorkers; i++ {
+	for i := range numWorkers {
 		wg.Add(1)
 		go func(workerID int) {
 			defer wg.Done()
 			for filePath := range fileChan {
-				fmt.Printf("Worker %d validating: %s\n", workerID, filePath)
+				logger.Log.Debug("Found file!", logger.Log.Args("Path:", filePath), logger.Log.Args("WorkerID", workerID))
 				if err := ValidateJSONFile(filePath); err != nil {
 					errChan <- fmt.Errorf("error in %s: %w", filePath, err)
 				}
@@ -64,7 +64,6 @@ func processFilesWithWorkers(files []string) error {
 	// Collect errors
 	var finalErr error
 	for e := range errChan {
-		fmt.Println(e)
 		finalErr = e
 	}
 
@@ -78,11 +77,9 @@ func ValidateJSONFilesRecursively(rootPath string) error {
 	// Walk through the directory and collect JSON files
 	err := filepath.Walk(rootPath, func(filePath string, info os.FileInfo, err error) error {
 		if err != nil {
-			fmt.Printf("Error accessing %s: %v\n", filePath, err)
 			return nil // Continue with other files
 		}
 		if !info.IsDir() && strings.HasSuffix(strings.ToLower(info.Name()), ".json") {
-			fmt.Printf("Found JSON file: %s\n", filePath)
 			files = append(files, filePath)
 		}
 		return nil
@@ -93,7 +90,6 @@ func ValidateJSONFilesRecursively(rootPath string) error {
 	}
 
 	if len(files) == 0 {
-		fmt.Println("No JSON files found.")
 		return nil
 	}
 
@@ -109,7 +105,6 @@ func ValidateJSONFilesWithPattern(pattern string) error {
 	}
 
 	if len(matches) == 0 {
-		fmt.Printf("No files matched pattern: %s\n", pattern)
 		return nil
 	}
 
