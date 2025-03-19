@@ -36,6 +36,10 @@ jsonvalidate -r  0,06s user 0,12s system 108% cpu 0,163 total
 
 Success!
 
+## Install
+
+Look for and download your binary for your arch or debian package in the [realeases page](https://github.com/vicendominguez/jsonvalidate/releases).
+
 ## Usage
 
 Run the tool with the following options:

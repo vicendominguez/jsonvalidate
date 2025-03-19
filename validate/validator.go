@@ -13,20 +13,21 @@ import (
 
 // ValidateJSONFile checks if a single JSON file is valid.
 func ValidateJSONFile(filePath string) error {
-	file, err := os.Open(filePath)
+	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return fmt.Errorf("failed to open file %s: %w", filePath, err)
 	}
-	defer file.Close()
 	logger.Log.Debug("Validating file", logger.Log.Args("Path:", filePath))
-	decoder := json.NewDecoder(file)
-	return validateJSON(decoder)
+	return validateJSONBytes(data)
 }
 
 // ValidateJSONFromStdin reads and validates JSON from standard input.
 func ValidateJSONFromStdin() error {
-	decoder := json.NewDecoder(os.Stdin)
-	return validateJSON(decoder)
+	data, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		return fmt.Errorf("failed to read stdin: %w", err)
+	}
+	return validateJSONBytes(data)
 }
 
 // processFilesWithWorkers runs a worker pool to validate files concurrently.
@@ -111,16 +112,28 @@ func ValidateJSONFilesWithPattern(pattern string) error {
 	return processFilesWithWorkers(matches)
 }
 
-// validateJSON ensures JSON validity.
-func validateJSON(decoder *json.Decoder) error {
+// validateJSONBytes ensures JSON validity.
+func validateJSONBytes(data []byte) error {
 	var obj json.RawMessage
-	for {
-		err := decoder.Decode(&obj)
-		if err == io.EOF {
-			return nil // JSON is valid
+	if err := json.Unmarshal(data, &obj); err != nil {
+		if syntaxErr, ok := err.(*json.SyntaxError); ok {
+			line, col := offsetToLineCol(data, syntaxErr.Offset)
+			return fmt.Errorf("invalid JSON at line %d, column %d", line, col)
 		}
-		if err != nil {
-			return fmt.Errorf("invalid JSON: %w", err)
+		return fmt.Errorf("invalid JSON: %w", err)
+	}
+	return nil
+}
+
+func offsetToLineCol(data []byte, offset int64) (int, int) {
+	line, col := 1, 1
+	for i := int64(0); i < offset && i < int64(len(data)); i++ {
+		if data[i] == '\n' {
+			line++
+			col = 1
+		} else {
+			col++
 		}
 	}
+	return line, col
 }
