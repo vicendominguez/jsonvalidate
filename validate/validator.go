@@ -62,13 +62,17 @@ func processFilesWithWorkers(files []string) error {
 	wg.Wait()
 	close(errChan)
 
-	// Collect errors
-	var finalErr error
+	// Collect ALL errors
+	var hasErrors bool
 	for e := range errChan {
-		finalErr = e
+		logger.Log.Error("Validation failed", logger.Log.Args("error", e))
+		hasErrors = true
 	}
 
-	return finalErr
+	if hasErrors {
+		return fmt.Errorf("one or more JSON files failed validation")
+	}
+	return nil
 }
 
 // ValidateJSONFilesRecursively finds and validates all JSON files in a directory.
